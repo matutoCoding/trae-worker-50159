@@ -182,9 +182,9 @@ class GenerateBillDialog(QDialog):
             discount_amount=self.sp_discount.value()
         )
         if bill:
+            self._saved_bill_id = bill.id
             receipt = BillingEngine.format_receipt(bill.id)
             self._show_receipt(receipt)
-            self.result_bill = bill
             self.accept()
         else:
             QMessageBox.warning(self, '生成失败', info or '未知错误')
@@ -203,12 +203,17 @@ class GenerateBillDialog(QDialog):
         btns = QHBoxLayout()
         bs = QPushButton('💾 保存小票')
         bs.setStyleSheet(_btn_secondary())
+        bill_id_ref = self._saved_bill_id
         def save():
-            fn, _ = QFileDialog.getSaveFileName(dlg, '保存小票', f'bill_B{self.result_bill.id:08d}.txt', '文本文件 (*.txt)')
+            default_name = f'bill_B{bill_id_ref:08d}.txt'
+            fn, _ = QFileDialog.getSaveFileName(dlg, '保存小票', default_name, '文本文件 (*.txt)')
             if fn:
-                with open(fn, 'w', encoding='utf-8') as f:
-                    f.write(text)
-                QMessageBox.information(dlg, '成功', '小票已保存')
+                try:
+                    with open(fn, 'w', encoding='utf-8') as f:
+                        f.write(text)
+                    QMessageBox.information(dlg, '成功', f'小票已保存至:\n{fn}')
+                except Exception as e:
+                    QMessageBox.warning(dlg, '保存失败', str(e))
         bs.clicked.connect(save)
         btns.addWidget(bs)
         btns.addStretch(1)
@@ -221,7 +226,7 @@ class GenerateBillDialog(QDialog):
 
 
 class ReceiptDialog(QDialog):
-    def __init__(self, parent, receipt_text):
+    def __init__(self, parent, receipt_text, bill_id=None):
         super().__init__(parent)
         self.setWindowTitle('🧾 消费账单')
         self.resize(500, 660)
@@ -236,11 +241,15 @@ class ReceiptDialog(QDialog):
         bs = QPushButton('💾 保存为文件')
         bs.setStyleSheet(_btn_secondary())
         def save():
-            fn, _ = QFileDialog.getSaveFileName(self, '保存小票', 'bill_receipt.txt', '文本文件 (*.txt)')
+            default_name = f'bill_B{bill_id:08d}.txt' if bill_id else 'bill_receipt.txt'
+            fn, _ = QFileDialog.getSaveFileName(self, '保存小票', default_name, '文本文件 (*.txt)')
             if fn:
-                with open(fn, 'w', encoding='utf-8') as f:
-                    f.write(receipt_text)
-                QMessageBox.information(self, '成功', '小票已保存')
+                try:
+                    with open(fn, 'w', encoding='utf-8') as f:
+                        f.write(receipt_text)
+                    QMessageBox.information(self, '成功', f'小票已保存至:\n{fn}')
+                except Exception as e:
+                    QMessageBox.warning(self, '保存失败', str(e))
         bs.clicked.connect(save)
         btns.addWidget(bs)
         btns.addStretch(1)
@@ -453,4 +462,4 @@ class BillingPage(QWidget):
 
     def _on_receipt(self, bill_id):
         txt = BillingEngine.format_receipt(bill_id)
-        ReceiptDialog(self, txt).exec()
+        ReceiptDialog(self, txt, bill_id).exec()

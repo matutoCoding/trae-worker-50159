@@ -1,3 +1,4 @@
+import json
 from .database import Database
 
 
@@ -9,7 +10,10 @@ class Bill:
     def __init__(self, id=None, appointment_id=None, pet_id=None, service_id=None,
                  workstation_id=None, base_amount=0, discount_amount=0,
                  final_amount=0, price_capped=0, paid_status=STATUS_UNPAID,
-                 paid_at=None, created_at=None):
+                 paid_at=None, created_at=None,
+                 overtime_minutes=0, overtime_fee=0,
+                 weight_surcharge=0, species_surcharge=0,
+                 extra_items_text='', extra_items_fee=0):
         self.id = id
         self.appointment_id = appointment_id
         self.pet_id = pet_id
@@ -22,6 +26,12 @@ class Bill:
         self.paid_status = paid_status
         self.paid_at = paid_at
         self.created_at = created_at
+        self.overtime_minutes = overtime_minutes
+        self.overtime_fee = overtime_fee
+        self.weight_surcharge = weight_surcharge
+        self.species_surcharge = species_surcharge
+        self.extra_items_text = extra_items_text
+        self.extra_items_fee = extra_items_fee
 
     @staticmethod
     def add(bill_data):
@@ -29,13 +39,21 @@ class Bill:
         cur = db.cursor()
         cur.execute(
             """INSERT INTO bills(appointment_id,pet_id,service_id,workstation_id,
-               base_amount,discount_amount,final_amount,price_capped,paid_status)
-               VALUES(?,?,?,?,?,?,?,?,?)""",
+               base_amount,discount_amount,final_amount,price_capped,paid_status,
+               overtime_minutes,overtime_fee,weight_surcharge,species_surcharge,
+               extra_items_text,extra_items_fee)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (bill_data['appointment_id'], bill_data['pet_id'], bill_data['service_id'],
              bill_data.get('workstation_id'), bill_data['base_amount'],
              bill_data.get('discount_amount', 0), bill_data['final_amount'],
              bill_data.get('price_capped', 0),
-             bill_data.get('paid_status', Bill.STATUS_UNPAID))
+             bill_data.get('paid_status', Bill.STATUS_UNPAID),
+             bill_data.get('overtime_minutes', 0),
+             bill_data.get('overtime_fee', 0),
+             bill_data.get('weight_surcharge', 0),
+             bill_data.get('species_surcharge', 0),
+             bill_data.get('extra_items_text', ''),
+             bill_data.get('extra_items_fee', 0))
         )
         db.commit()
         return cur.lastrowid
@@ -126,6 +144,23 @@ class Bill:
                 result[k] = 0
         return result
 
+    def get_extra_items(self):
+        if not self.extra_items_text:
+            return {}
+        try:
+            return json.loads(self.extra_items_text)
+        except (json.JSONDecodeError, TypeError):
+            items = {}
+            for line in self.extra_items_text.split('\n'):
+                line = line.strip()
+                if '=' in line:
+                    k, v = line.rsplit('=', 1)
+                    try:
+                        items[k.strip()] = float(v.strip())
+                    except ValueError:
+                        pass
+            return items
+
     def to_dict(self):
         return {
             'id': self.id, 'appointment_id': self.appointment_id,
@@ -136,5 +171,11 @@ class Bill:
             'final_amount': self.final_amount,
             'price_capped': self.price_capped,
             'paid_status': self.paid_status,
-            'paid_at': self.paid_at, 'created_at': self.created_at
+            'paid_at': self.paid_at, 'created_at': self.created_at,
+            'overtime_minutes': self.overtime_minutes,
+            'overtime_fee': self.overtime_fee,
+            'weight_surcharge': self.weight_surcharge,
+            'species_surcharge': self.species_surcharge,
+            'extra_items_text': self.extra_items_text,
+            'extra_items_fee': self.extra_items_fee
         }

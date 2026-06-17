@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from models import Bill, Appointment, Pet, Workstation, Service
 from .pricing import PricingEngine
@@ -28,6 +29,8 @@ class BillingEngine:
         if err:
             return None, err
 
+        extra_items_text = json.dumps(extra_items, ensure_ascii=False) if extra_items else ''
+
         bill_id = Bill.add({
             'appointment_id': appointment_id,
             'pet_id': appt.pet_id,
@@ -37,7 +40,13 @@ class BillingEngine:
             'discount_amount': price_info['discount_amount'],
             'final_amount': price_info['final_amount'],
             'price_capped': price_info['price_capped'],
-            'paid_status': Bill.STATUS_UNPAID
+            'paid_status': Bill.STATUS_UNPAID,
+            'overtime_minutes': overtime_minutes,
+            'overtime_fee': price_info.get('overtime_surcharge', 0),
+            'weight_surcharge': price_info.get('weight_surcharge', 0),
+            'species_surcharge': price_info.get('species_surcharge', 0),
+            'extra_items_text': extra_items_text,
+            'extra_items_fee': price_info.get('extra_items_surcharge', 0)
         })
 
         Appointment.update(appointment_id, {'status': Appointment.STATUS_COMPLETED})
@@ -61,9 +70,21 @@ class BillingEngine:
         svc = Service.get(bill.service_id)
         ws = Workstation.get(bill.workstation_id) if bill.workstation_id else None
 
-        price_info, _ = PricingEngine.calculate_price(
-            bill.service_id, bill.pet_id
-        )
+        price_info = {
+            'base_price': float(svc.base_price) if svc else 0,
+            'cap_price': float(svc.cap_price) if svc else 0,
+            'is_package': bool(svc.is_package) if svc else False,
+            'weight_surcharge': bill.weight_surcharge or 0,
+            'species_surcharge': bill.species_surcharge or 0,
+            'overtime_surcharge': bill.overtime_fee or 0,
+            'extra_items_surcharge': bill.extra_items_fee or 0,
+            'discount_amount': bill.discount_amount or 0,
+            'raw_amount': bill.base_amount,
+            'final_amount': bill.final_amount,
+            'price_capped': bill.price_capped,
+            'extra_items': bill.get_extra_items(),
+            'overtime_minutes': bill.overtime_minutes or 0
+        }
 
         result = {
             'bill': bill.to_dict(),
@@ -112,15 +133,20 @@ class BillingEngine:
             lines.append(f'    大型犬加价:          ¥{pricing.get("weight_surcharge",0):>8.2f}')
         if pricing.get('species_surcharge', 0) > 0:
             lines.append(f'    猫只护理加价:        ¥{pricing.get("species_surcharge",0):>8.2f}')
-        if pricing.get('overtime_surcharge', 0) > 0:
-            lines.append(f'    超时服务费:          ¥{pricing.get("overtime_surcharge",0):>8.2f}')
-        if pricing.get('extra_items_surcharge', 0) > 0:
-            lines.append(f'    额外项目费:          ¥{pricing.get("extra_items_surcharge",0):>8.2f}')
+        if pricing.get('overtime_minutes', 0) > 0:
+            lines.append(f'    超时服务({pricing["overtime_minutes"]}分钟):  ¥{pricing.get("overtime_surcharge",0):>8.2f}')
+        extra_items = pricing.get('extra_items', {})
+        if extra_items:
+            for k, v in extra_items.items():
+                lines.append(f'    {k}:              ¥{float(v):>8.2f}')
         if pricing.get('discount_amount', 0) > 0:
             lines.append(f'    优惠折扣:           -¥{pricing.get("discount_amount",0):>8.2f}')
         if bill.get('price_capped'):
             lines.append(f'    *已按封顶价计费')
         lines.append('-' * 48)
+        lines.append(f'  原价合计:              ¥{bill["base_amount"]:>8.2f}')
+        if bill.get('discount_amount', 0) > 0:
+            lines.append(f'  优惠抵扣:             -¥{bill["discount_amount"]:>8.2f}')
         lines.append(f'  合计应付:              ¥{bill["final_amount"]:>8.2f}')
         lines.append(f'  支付状态: {"[已结清]" if bill["paid_status"]=="paid" else "[待支付]"}')
         if bill.get('paid_at'):

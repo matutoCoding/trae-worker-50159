@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                              QDialog, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
                              QTextEdit, QMessageBox, QFrame, QCheckBox)
 from PyQt6.QtCore import Qt
-from models import Service
+from models import Service, Appointment
 from modules import PricingEngine
 
 
@@ -68,6 +68,7 @@ class ServiceFormDialog(QDialog):
         self.chk_pkg = QCheckBox('是套餐项目（起步价=封顶价）')
         self.chk_pkg.toggled.connect(self._on_pkg)
         form.addRow('套餐:', self.chk_pkg)
+        self.sp_base.valueChanged.connect(self._on_base_changed)
         self.te_desc = QTextEdit()
         self.te_desc.setFixedHeight(80)
         self.te_desc.setPlaceholderText('服务描述、包含内容...')
@@ -110,6 +111,12 @@ class ServiceFormDialog(QDialog):
             self.sp_cap.setEnabled(False)
         else:
             self.sp_cap.setEnabled(True)
+
+    def _on_base_changed(self, val):
+        if self.chk_pkg.isChecked():
+            self.sp_cap.blockSignals(True)
+            self.sp_cap.setValue(val)
+            self.sp_cap.blockSignals(False)
 
     def _preview(self):
         errs = PricingEngine.validate_service_pricing(
@@ -199,7 +206,7 @@ class ServicePage(QWidget):
             QTableWidget::item { padding: 6px 10px; }
             QHeaderView::section { background:#f9fafb; padding:10px; border:none; border-bottom:2px solid #e5e7eb; color:#374151; font-weight:bold; }
         ''')
-        hd = ['ID', '项目名', '分类', '类型', '时长', '起步价', '封顶价', '价差', '描述', '操作']
+        hd = ['ID', '项目名', '分类', '类型', '时长', '起步价', '封顶价', '定价', '描述', '操作']
         self.table.setColumnCount(len(hd))
         self.table.setHorizontalHeaderLabels(hd)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -221,13 +228,17 @@ class ServicePage(QWidget):
         self.table.setRowCount(len(items))
         for row, s in enumerate(items):
             diff = s.cap_price - s.base_price
+            if s.is_package:
+                price_display = f'¥{s.base_price:.2f} 一口价'
+            else:
+                price_display = f'¥{s.base_price:.2f} ~ ¥{s.cap_price:.2f}'
             vals = [
                 str(s.id), s.name, s.category,
                 '📦 套餐' if s.is_package else '🧴 标准',
                 f'{s.duration} 分钟',
                 f'¥{s.base_price:.2f}',
                 f'¥{s.cap_price:.2f}',
-                f'¥{diff:.2f}' if not s.is_package else '—'
+                price_display
             ]
             for col, v in enumerate(vals):
                 it = QTableWidgetItem(v)
@@ -268,7 +279,15 @@ class ServicePage(QWidget):
             self.refresh()
 
     def _on_del(self, s):
-        r = QMessageBox.question(self, '确认删除', f'确定删除服务「{s.name}」？',
+        appt_count = Appointment.count_by_service(s.id)
+        if appt_count > 0:
+            QMessageBox.warning(
+                self, '无法删除',
+                f'服务项目「{s.name}」仍有 {appt_count} 条有效预约记录，无法删除。\n\n'
+                f'如需停用，可编辑该项目的描述标注"已停用"，现有预约和账单仍可正常查看。'
+            )
+            return
+        r = QMessageBox.question(self, '确认删除', f'确定删除服务「{s.name}」？\n该项目暂无有效预约，删除后不可恢复。',
                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if r == QMessageBox.StandardButton.Yes:
             Service.delete(s.id)

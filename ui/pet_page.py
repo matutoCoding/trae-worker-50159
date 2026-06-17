@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                              QDialog, QFormLayout, QComboBox, QDoubleSpinBox,
                              QSpinBox, QTextEdit, QMessageBox, QFrame, QSizePolicy)
 from PyQt6.QtCore import Qt
-from models import Pet
+from models import Pet, Appointment
 
 
 class PetFormDialog(QDialog):
@@ -245,9 +245,17 @@ class PetPage(QWidget):
             self.refresh()
 
     def _on_delete(self, pet):
+        appt_count = Appointment.count_by_pet(pet.id)
+        if appt_count > 0:
+            QMessageBox.warning(
+                self, '无法删除',
+                f'宠物「{pet.name}」仍有 {appt_count} 条有效预约记录，无法删除。\n\n'
+                f'如需归档，请将宠物备注中标注"已归档"，相关预约和账单仍可正常查看。'
+            )
+            return
         r = QMessageBox.question(
             self, '确认删除',
-            f'确定删除宠物「{pet.name}」的档案吗？\n相关预约记录不会被删除。',
+            f'确定删除宠物「{pet.name}」的档案吗？\n该宠物暂无有效预约，删除后不可恢复。',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if r == QMessageBox.StandardButton.Yes:

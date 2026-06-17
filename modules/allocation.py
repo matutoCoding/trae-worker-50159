@@ -200,8 +200,10 @@ class AllocationEngine:
                 continue
             sd, ed = AllocationEngine._parse_range(a.start_time, a.end_time)
             total_minutes += AllocationEngine._minutes_between(sd, ed)
-        capacity = 8 * 60 * 7
-        load_score = round(total_minutes / capacity * 10, 2)
+        ws = Workstation.get(ws_id)
+        capacity = ws.capacity if ws else 1
+        capacity_minutes = 8 * 60 * 7 * capacity
+        load_score = round(total_minutes / capacity_minutes * 10, 2)
         Workstation.update_load_score(ws_id, load_score)
 
     @staticmethod

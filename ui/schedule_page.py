@@ -39,7 +39,7 @@ STATUS_BORDER = {
 class TimeBar(QWidget):
     clicked = pyqtSignal(int)
 
-    def __init__(self, row, col, hour, minute, free=True, appt_info=None, parent=None):
+    def __init__(self, row, col, hour, minute, free=True, appt_info=None, capacity=1, parent=None):
         super().__init__(parent)
         self.row = row
         self.col = col
@@ -47,6 +47,7 @@ class TimeBar(QWidget):
         self.minute = minute
         self.free = free
         self.appt_info = appt_info
+        self.capacity = capacity
         self._build()
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -57,6 +58,7 @@ class TimeBar(QWidget):
         lay.setContentsMargins(2, 2, 2, 2)
         if self.appt_info:
             st = self.appt_info.get('status', 'confirmed')
+            multi = self.appt_info.get('multi', 0)
             self.setStyleSheet(f'''
                 QWidget {{
                     background: {STATUS_COLOR.get(st, '#dbeafe')};
@@ -65,7 +67,12 @@ class TimeBar(QWidget):
                     margin: 1px;
                 }}
             ''')
-            lbl = QLabel(f"{self.appt_info.get('pet_name', '?')}\n{self.appt_info.get('service_name', '')[:6]}")
+            pet_name = self.appt_info.get('pet_name', '?')
+            svc_name = self.appt_info.get('service_name', '')[:6]
+            if multi > 1:
+                lbl = QLabel(f"{pet_name}\n×{multi}只")
+            else:
+                lbl = QLabel(f"{pet_name}\n{svc_name}")
             lbl.setStyleSheet(f'color:#1f2937; font-size:11px; padding:2px 4px;')
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setWordWrap(True)
@@ -82,6 +89,8 @@ class TimeBar(QWidget):
                 }}
             ''')
             text = f'{self.hour:02d}:{self.minute:02d}' if self.minute % 30 == 0 else ''
+            if self.capacity > 1 and self.minute % 30 == 0:
+                text = f'{self.hour:02d}:{self.minute:02d}'
             lbl = QLabel(text)
             lbl.setStyleSheet('color:#6b7280; font-size:10px;')
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -207,7 +216,11 @@ class SchedulePage(QWidget):
             name = QLabel(ws.name)
             name.setStyleSheet('font-weight:bold; color:#1f2937; font-size:13px;')
             name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            tp = QLabel(f'{ws.type} · 负载{ws.load_score:.1f}')
+            cap_text = f'容量{ws.capacity}' if ws.capacity > 1 else ''
+            tp_text = f'{ws.type} · 负载{ws.load_score:.1f}'
+            if cap_text:
+                tp_text = f'{cap_text} | {tp_text}'
+            tp = QLabel(tp_text)
             tp.setStyleSheet('color:#6b7280; font-size:11px;')
             tp.setAlignment(Qt.AlignmentFlag.AlignCenter)
             hl.addWidget(name)
@@ -253,21 +266,36 @@ class SchedulePage(QWidget):
             for col, ws in enumerate(ws_list):
                 slot_dt = datetime.strptime(f'{date_str} {h:02d}:{m:02d}', '%Y-%m-%d %H:%M')
                 slot_end_dt = slot_dt + timedelta(minutes=self.SLOT_MIN)
-                occupied_info = None
+                matching_appts = []
                 for info in appts_by_ws.get(ws.id, []):
                     try:
                         a_s = datetime.strptime(info['start'], '%Y-%m-%d %H:%M')
                         a_e = datetime.strptime(info['end'], '%Y-%m-%d %H:%M')
                         if a_s <= slot_dt and slot_dt < a_e:
-                            occupied_info = info
-                            break
+                            matching_appts.append(info)
                     except:
                         pass
-                bar = TimeBar(i + 1, col + 1, h, m, free=(occupied_info is None), appt_info=occupied_info)
-                grid.addWidget(bar, i + 1, col + 1)
+                if matching_appts:
+                    if len(matching_appts) == 1:
+                        bar = TimeBar(i + 1, col + 1, h, m, free=False, appt_info=matching_appts[0])
+                    else:
+                        names = '/'.join(a.get('pet_name', '?') for a in matching_appts)
+                        multi_info = dict(matching_appts[0])
+                        multi_info['pet_name'] = names
+                        multi_info['multi'] = len(matching_appts)
+                        bar = TimeBar(i + 1, col + 1, h, m, free=False, appt_info=multi_info)
+                    grid.addWidget(bar, i + 1, col + 1)
+                else:
+                    ws_capacity = ws.capacity or 1
+                    is_free = True
+                    bar = TimeBar(i + 1, col + 1, h, m, free=is_free, appt_info=None,
+                                  capacity=ws_capacity)
+                    grid.addWidget(bar, i + 1, col + 1)
 
-        total_occ, total_slots_count = 0, total_slots * len(ws_list)
+        total_occ, total_capacity_slots = 0, 0
         for ws in ws_list:
+            cap = ws.capacity or 1
+            total_capacity_slots += total_slots * cap
             for info in appts_by_ws.get(ws.id, []):
                 try:
                     a_s = datetime.strptime(info['start'], '%Y-%m-%d %H:%M')
@@ -275,7 +303,7 @@ class SchedulePage(QWidget):
                     total_occ += int((a_e - a_s).total_seconds() / 60 / self.SLOT_MIN)
                 except:
                     pass
-        rate = (total_occ / total_slots_count * 100) if total_slots_count else 0
+        rate = (total_occ / total_capacity_slots * 100) if total_capacity_slots else 0
         self.lbl_summary.setText(
-            f'工位数: {len(ws_list)}  |  排期占用: {total_occ}/{total_slots_count} 格  |  占用率: {rate:.1f}%'
+            f'工位数: {len(ws_list)}  |  排期占用: {total_occ}/{total_capacity_slots} 格  |  占用率: {rate:.1f}%'
         )

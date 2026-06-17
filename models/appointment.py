@@ -115,6 +115,20 @@ class Appointment:
         return [Appointment(**dict(r)) for r in cur.fetchall()]
 
     @staticmethod
+    def count_conflicting(ws_id, start_time, end_time, exclude_id=None):
+        db = Database().conn()
+        cur = db.cursor()
+        sql = """SELECT COUNT(*) FROM appointments WHERE workstation_id=?
+                 AND status != 'cancelled'
+                 AND start_time < ? AND end_time > ?"""
+        params = [ws_id, end_time, start_time]
+        if exclude_id:
+            sql += " AND id != ?"
+            params.append(exclude_id)
+        cur.execute(sql, params)
+        return cur.fetchone()[0]
+
+    @staticmethod
     def list(keyword=None):
         db = Database().conn()
         cur = db.cursor()
@@ -135,6 +149,26 @@ class Appointment:
         sql += " ORDER BY a.created_at DESC LIMIT 200"
         cur.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
+
+    @staticmethod
+    def count_by_pet(pet_id):
+        db = Database().conn()
+        cur = db.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM appointments WHERE pet_id=? AND status != 'cancelled'",
+            (pet_id,)
+        )
+        return cur.fetchone()[0]
+
+    @staticmethod
+    def count_by_service(service_id):
+        db = Database().conn()
+        cur = db.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM appointments WHERE service_id=? AND status != 'cancelled'",
+            (service_id,)
+        )
+        return cur.fetchone()[0]
 
     def to_dict(self):
         return {

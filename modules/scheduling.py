@@ -55,8 +55,10 @@ class Scheduling:
 
     @staticmethod
     def is_workstation_available(ws_id, start_time, end_time, exclude_appt_id=None):
-        conflicts = Appointment.list_conflicting(ws_id, start_time, end_time, exclude_appt_id)
-        return len(conflicts) == 0
+        ws = Workstation.get(ws_id)
+        capacity = ws.capacity if ws else 1
+        conflict_count = Appointment.count_conflicting(ws_id, start_time, end_time, exclude_appt_id)
+        return conflict_count < capacity
 
     @staticmethod
     def get_workstation_occupied_ranges(ws_id, date_str):
@@ -68,26 +70,59 @@ class Scheduling:
     @staticmethod
     def get_workstation_free_ranges(ws_id, date_str):
         start, end = Scheduling.get_work_hours(date_str)
+        ws = Workstation.get(ws_id)
+        capacity = ws.capacity if ws else 1
         occupied = sorted(
             Scheduling.get_workstation_occupied_ranges(ws_id, date_str),
             key=lambda x: x[0]
         )
-        free_ranges = []
-        cur_start = start
+        if capacity <= 1:
+            free_ranges = []
+            cur_start = start
+            for occ_s, occ_e, _ in occupied:
+                occ_s_dt = datetime.strptime(occ_s, '%Y-%m-%d %H:%M')
+                occ_e_dt = datetime.strptime(occ_e, '%Y-%m-%d %H:%M')
+                if cur_start < occ_s_dt:
+                    free_ranges.append((
+                        cur_start.strftime('%Y-%m-%d %H:%M'),
+                        min(occ_s_dt, end).strftime('%Y-%m-%d %H:%M')
+                    ))
+                cur_start = max(cur_start, occ_e_dt)
+                if cur_start >= end:
+                    break
+            if cur_start < end:
+                free_ranges.append((
+                    cur_start.strftime('%Y-%m-%d %H:%M'),
+                    end.strftime('%Y-%m-%d %H:%M')
+                ))
+            return free_ranges
+
+        events = []
         for occ_s, occ_e, _ in occupied:
             occ_s_dt = datetime.strptime(occ_s, '%Y-%m-%d %H:%M')
             occ_e_dt = datetime.strptime(occ_e, '%Y-%m-%d %H:%M')
-            if cur_start < occ_s_dt:
-                free_ranges.append((
-                    cur_start.strftime('%Y-%m-%d %H:%M'),
-                    min(occ_s_dt, end).strftime('%Y-%m-%d %H:%M')
-                ))
-            cur_start = max(cur_start, occ_e_dt)
-            if cur_start >= end:
-                break
-        if cur_start < end:
+            events.append((occ_s_dt, 1))
+            events.append((occ_e_dt, -1))
+        events.sort(key=lambda x: (x[0], x[1]))
+        free_ranges = []
+        cur_count = 0
+        free_start = start
+        for ev_time, ev_delta in events:
+            if ev_time < start or ev_time > end:
+                cur_count += ev_delta
+                continue
+            if cur_count < capacity and cur_count + ev_delta >= capacity:
+                if free_start < ev_time:
+                    free_ranges.append((
+                        free_start.strftime('%Y-%m-%d %H:%M'),
+                        min(ev_time, end).strftime('%Y-%m-%d %H:%M')
+                    ))
+            elif cur_count >= capacity and cur_count + ev_delta < capacity:
+                free_start = max(ev_time, start)
+            cur_count += ev_delta
+        if cur_count < capacity and free_start < end:
             free_ranges.append((
-                cur_start.strftime('%Y-%m-%d %H:%M'),
+                free_start.strftime('%Y-%m-%d %H:%M'),
                 end.strftime('%Y-%m-%d %H:%M')
             ))
         return free_ranges
