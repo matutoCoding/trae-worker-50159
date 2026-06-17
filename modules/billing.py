@@ -29,6 +29,12 @@ class BillingEngine:
         if err:
             return None, err
 
+        is_package = price_info['is_package']
+
+        if is_package:
+            overtime_minutes = 0
+            extra_items = None
+
         extra_items_text = json.dumps(extra_items, ensure_ascii=False) if extra_items else ''
 
         bill_id = Bill.add({
@@ -128,17 +134,20 @@ class BillingEngine:
         lines.append(f'  项目时长: {svc.get("duration",0)} 分钟')
         lines.append('-' * 48)
         lines.append('  费用明细:')
-        lines.append(f'    起步价:              ¥{pricing.get("base_price",0):>8.2f}')
-        if pricing.get('weight_surcharge', 0) > 0:
-            lines.append(f'    大型犬加价:          ¥{pricing.get("weight_surcharge",0):>8.2f}')
-        if pricing.get('species_surcharge', 0) > 0:
-            lines.append(f'    猫只护理加价:        ¥{pricing.get("species_surcharge",0):>8.2f}')
-        if pricing.get('overtime_minutes', 0) > 0:
-            lines.append(f'    超时服务({pricing["overtime_minutes"]}分钟):  ¥{pricing.get("overtime_surcharge",0):>8.2f}')
-        extra_items = pricing.get('extra_items', {})
-        if extra_items:
-            for k, v in extra_items.items():
-                lines.append(f'    {k}:              ¥{float(v):>8.2f}')
+        if pricing.get('is_package'):
+            lines.append(f'    套餐一口价:          ¥{pricing.get("base_price",0):>8.2f}')
+        else:
+            lines.append(f'    起步价:              ¥{pricing.get("base_price",0):>8.2f}')
+            if pricing.get('weight_surcharge', 0) > 0:
+                lines.append(f'    大型犬加价:          ¥{pricing.get("weight_surcharge",0):>8.2f}')
+            if pricing.get('species_surcharge', 0) > 0:
+                lines.append(f'    猫只护理加价:        ¥{pricing.get("species_surcharge",0):>8.2f}')
+            if pricing.get('overtime_minutes', 0) > 0:
+                lines.append(f'    超时服务({pricing["overtime_minutes"]}分钟):  ¥{pricing.get("overtime_surcharge",0):>8.2f}')
+            extra_items = pricing.get('extra_items', {})
+            if extra_items:
+                for k, v in extra_items.items():
+                    lines.append(f'    {k}:              ¥{float(v):>8.2f}')
         if pricing.get('discount_amount', 0) > 0:
             lines.append(f'    优惠折扣:           -¥{pricing.get("discount_amount",0):>8.2f}')
         if bill.get('price_capped'):

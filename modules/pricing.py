@@ -138,8 +138,9 @@ class PricingEngine:
             if pet:
                 result['weight_surcharge'] = PricingEngine._calc_weight_surcharge(base_price, pet.weight)
                 result['species_surcharge'] = PricingEngine._calc_species_surcharge(base_price, pet.species)
-        result['overtime_surcharge'] = PricingEngine._calc_overtime_surcharge(overtime_minutes)
-        result['extra_items_surcharge'] = PricingEngine._calc_extra_items_surcharge(extra_items)
+        if not is_package:
+            result['overtime_surcharge'] = PricingEngine._calc_overtime_surcharge(overtime_minutes)
+            result['extra_items_surcharge'] = PricingEngine._calc_extra_items_surcharge(extra_items)
 
         return result, None
 

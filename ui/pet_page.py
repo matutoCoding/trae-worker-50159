@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                              QDialog, QFormLayout, QComboBox, QDoubleSpinBox,
                              QSpinBox, QTextEdit, QMessageBox, QFrame, QSizePolicy)
 from PyQt6.QtCore import Qt
-from models import Pet, Appointment
+from models import Pet, Appointment, Bill
 
 
 class PetFormDialog(QDialog):
@@ -245,17 +245,26 @@ class PetPage(QWidget):
             self.refresh()
 
     def _on_delete(self, pet):
-        appt_count = Appointment.count_by_pet(pet.id)
-        if appt_count > 0:
+        active_appt = Appointment.count_by_pet(pet.id)
+        all_appt = Appointment.count_all_by_pet(pet.id)
+        bill_count = Bill.count_by_pet(pet.id)
+        total_links = all_appt + bill_count
+
+        if total_links > 0:
+            if active_appt > 0:
+                msg = f'宠物「{pet.name}」仍有 {active_appt} 条有效预约，无法删除。'
+            elif all_appt > 0:
+                msg = f'宠物「{pet.name}」有 {all_appt} 条历史预约（含已取消），无法删除。'
+            else:
+                msg = f'宠物「{pet.name}」有 {bill_count} 条账单记录，无法删除。'
             QMessageBox.warning(
                 self, '无法删除',
-                f'宠物「{pet.name}」仍有 {appt_count} 条有效预约记录，无法删除。\n\n'
-                f'如需归档，请将宠物备注中标注"已归档"，相关预约和账单仍可正常查看。'
+                f'{msg}\n\n如需归档，请将宠物备注中标注"已归档"，相关预约和账单仍可正常查看。'
             )
             return
         r = QMessageBox.question(
             self, '确认删除',
-            f'确定删除宠物「{pet.name}」的档案吗？\n该宠物暂无有效预约，删除后不可恢复。',
+            f'确定删除宠物「{pet.name}」的档案吗？\n该宠物无任何关联记录，删除后不可恢复。',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if r == QMessageBox.StandardButton.Yes:

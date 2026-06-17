@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                              QDialog, QFormLayout, QComboBox, QSpinBox, QDoubleSpinBox,
                              QTextEdit, QMessageBox, QFrame, QCheckBox)
 from PyQt6.QtCore import Qt
-from models import Service, Appointment
+from models import Service, Appointment, Bill
 from modules import PricingEngine
 
 
@@ -279,15 +279,24 @@ class ServicePage(QWidget):
             self.refresh()
 
     def _on_del(self, s):
-        appt_count = Appointment.count_by_service(s.id)
-        if appt_count > 0:
+        active_appt = Appointment.count_by_service(s.id)
+        all_appt = Appointment.count_all_by_service(s.id)
+        bill_count = Bill.count_by_service(s.id)
+        total_links = all_appt + bill_count
+
+        if total_links > 0:
+            if active_appt > 0:
+                msg = f'服务项目「{s.name}」仍有 {active_appt} 条有效预约，无法删除。'
+            elif all_appt > 0:
+                msg = f'服务项目「{s.name}」有 {all_appt} 条历史预约（含已取消），无法删除。'
+            else:
+                msg = f'服务项目「{s.name}」有 {bill_count} 条账单记录，无法删除。'
             QMessageBox.warning(
                 self, '无法删除',
-                f'服务项目「{s.name}」仍有 {appt_count} 条有效预约记录，无法删除。\n\n'
-                f'如需停用，可编辑该项目的描述标注"已停用"，现有预约和账单仍可正常查看。'
+                f'{msg}\n\n如需停用，可编辑该项目的描述标注"已停用"，现有预约和账单仍可正常查看。'
             )
             return
-        r = QMessageBox.question(self, '确认删除', f'确定删除服务「{s.name}」？\n该项目暂无有效预约，删除后不可恢复。',
+        r = QMessageBox.question(self, '确认删除', f'确定删除服务「{s.name}」？\n该项目无任何关联记录，删除后不可恢复。',
                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if r == QMessageBox.StandardButton.Yes:
             Service.delete(s.id)

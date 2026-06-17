@@ -144,6 +144,20 @@ class Bill:
                 result[k] = 0
         return result
 
+    @staticmethod
+    def count_by_pet(pet_id):
+        db = Database().conn()
+        cur = db.cursor()
+        cur.execute("SELECT COUNT(*) FROM bills WHERE pet_id=?", (pet_id,))
+        return cur.fetchone()[0]
+
+    @staticmethod
+    def count_by_service(service_id):
+        db = Database().conn()
+        cur = db.cursor()
+        cur.execute("SELECT COUNT(*) FROM bills WHERE service_id=?", (service_id,))
+        return cur.fetchone()[0]
+
     def get_extra_items(self):
         if not self.extra_items_text:
             return {}

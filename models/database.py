@@ -19,6 +19,7 @@ class Database:
             cls._conn.row_factory = sqlite3.Row
             cls._conn.execute("PRAGMA foreign_keys = ON")
             cls._instance._init_tables()
+            cls._instance._migrate()
             cls._instance._seed_data()
         return cls._instance
 
@@ -104,6 +105,36 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_appts_status ON appointments(status);
             CREATE INDEX IF NOT EXISTS idx_bills_paid ON bills(paid_status);
         ''')
+        self._conn.commit()
+
+    def _migrate(self):
+        cur = self._conn.cursor()
+
+        cur.execute("PRAGMA user_version")
+        current_version = cur.fetchone()[0]
+
+        if current_version < 1:
+            cur.execute("PRAGMA table_info(bills)")
+            columns = [col[1] for col in cur.fetchall()]
+            migrations = [
+                ('overtime_minutes', 'INTEGER DEFAULT 0'),
+                ('overtime_fee', 'REAL DEFAULT 0'),
+                ('weight_surcharge', 'REAL DEFAULT 0'),
+                ('species_surcharge', 'REAL DEFAULT 0'),
+                ('extra_items_text', 'TEXT DEFAULT \'\''),
+                ('extra_items_fee', 'REAL DEFAULT 0'),
+            ]
+            for col_name, col_def in migrations:
+                if col_name not in columns:
+                    try:
+                        cur.execute(f"ALTER TABLE bills ADD COLUMN {col_name} {col_def}")
+                        print(f"[迁移] bills 表新增字段: {col_name}")
+                    except sqlite3.OperationalError:
+                        pass
+
+            cur.execute("PRAGMA user_version = 1")
+            print("[迁移] 数据库版本已升级到 v1")
+
         self._conn.commit()
 
     def _seed_data(self):

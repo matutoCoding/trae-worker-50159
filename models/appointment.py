@@ -161,6 +161,13 @@ class Appointment:
         return cur.fetchone()[0]
 
     @staticmethod
+    def count_all_by_pet(pet_id):
+        db = Database().conn()
+        cur = db.cursor()
+        cur.execute("SELECT COUNT(*) FROM appointments WHERE pet_id=?", (pet_id,))
+        return cur.fetchone()[0]
+
+    @staticmethod
     def count_by_service(service_id):
         db = Database().conn()
         cur = db.cursor()
@@ -168,6 +175,13 @@ class Appointment:
             "SELECT COUNT(*) FROM appointments WHERE service_id=? AND status != 'cancelled'",
             (service_id,)
         )
+        return cur.fetchone()[0]
+
+    @staticmethod
+    def count_all_by_service(service_id):
+        db = Database().conn()
+        cur = db.cursor()
+        cur.execute("SELECT COUNT(*) FROM appointments WHERE service_id=?", (service_id,))
         return cur.fetchone()[0]
 
     def to_dict(self):
