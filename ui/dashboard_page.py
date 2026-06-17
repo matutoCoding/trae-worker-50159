@@ -123,20 +123,34 @@ class DashboardPage(QWidget):
         pet_count = stats.get('pet_count', 0) or 0
         ws_count = stats.get('workstation_count', 0) or 0
         today_count = len(Appointment.list_by_date(QDate.currentDate().toString('yyyy-MM-dd')))
+        member_total_balance = stats.get('member_total_balance', 0) or 0
+        member_count = stats.get('member_count', 0) or 0
+        low_stock_count = stats.get('low_stock_count', 0) or 0
+        inv_consumed_7d = stats.get('inv_consumed_7d', 0) or 0
+        inv_consumed_value_7d = stats.get('inv_consumed_value_7d', 0) or 0
 
         cards = [
             ('营业总额', f'¥{total:,.2f}', f'{df} ~ {dt}', '#10b981'),
             ('已收款', f'¥{paid:,.2f}', '已结清订单', '#3b82f6'),
             ('待收款', f'¥{unpaid:,.2f}', '未结清订单', '#ef4444'),
             ('开单数', f'{bill_count} 单', f'封顶单 {cap_count} 单', '#8b5cf6'),
+            ('👥 会员储值', f'¥{member_total_balance:,.2f}', f'会员 {member_count} 名', '#2563eb'),
+            ('🧴 近7天耗材', f'{inv_consumed_7d} 件', f'消耗 ¥{inv_consumed_value_7d:,.2f}', '#0891b2'),
+            ('⚠️ 低库存项目', f'{low_stock_count} 项', '需尽快补货', '#dc2626'),
             ('今日预约', f'{today_count} 条', '排期订单', '#f59e0b'),
             ('在档宠物', f'{pet_count} 只', '已建立档案', '#06b6d4'),
             ('可用工位', f'{ws_count} 个', '当前工位总数', '#ec4899'),
         ]
         for i, (t, v, s, c) in enumerate(cards):
-            r, col = divmod(i, 4)
+            r, col = divmod(i, 5)
             self.stats_grid.addWidget(self._stat_card(t, v, s, c), r, col)
+
+        low_stock_items = stats.get('low_stock_items', []) or []
+        low_text = ''
+        if low_stock_items:
+            low_text = ' | 低库存: ' + '、'.join([f'{it["name"]}(剩{it["current_stock"]})' for it in low_stock_items[:3]])
 
         self.info_label.setText(
             f'统计区间: {df} 至 {dt}  |  营业 ¥{total:,.2f}  |  预约 {today_count} 单  |  在档宠物 {pet_count} 只'
+            f'  |  会员储值 ¥{member_total_balance:,.2f}  |  近7天耗材 ¥{inv_consumed_value_7d:,.2f}{low_text}'
         )

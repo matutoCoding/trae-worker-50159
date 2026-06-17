@@ -11,14 +11,17 @@ from .service_page import ServicePage
 from .appointment_page import AppointmentPage
 from .schedule_page import SchedulePage
 from .billing_page import BillingPage
+from .member_page import MemberPage
+from .inventory_page import InventoryPage
+from .settings_page import SettingsPage
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('萌宠之家 - 美容预约管理系统')
-        self.resize(1280, 800)
-        self.setMinimumSize(1100, 700)
+        self.resize(1360, 860)
+        self.setMinimumSize(1200, 760)
         self._setup_ui()
         self._apply_style()
 
@@ -50,11 +53,14 @@ class MainWindow(QMainWindow):
         nav_items = [
             ('📊  数据概览', DashboardPage),
             ('🐕  宠物档案', PetPage),
-            ('🛁  工位管理', WorkstationPage),
+            ('�  会员管理', MemberPage),
+            ('📦  库存管理', InventoryPage),
+            ('�🛁  工位管理', WorkstationPage),
             ('✂️  服务项目', ServicePage),
             ('📅  美容预约', AppointmentPage),
             ('🗓  排期看板', SchedulePage),
             ('💳  账单管理', BillingPage),
+            ('⚙️  系统设置', SettingsPage),
         ]
         for text, page_cls in nav_items:
             item = QListWidgetItem(text)

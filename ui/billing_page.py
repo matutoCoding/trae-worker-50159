@@ -2,10 +2,10 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                              QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView,
                              QDialog, QFormLayout, QComboBox, QDateEdit, QMessageBox,
                              QFrame, QTextEdit, QDoubleSpinBox, QSpinBox, QFileDialog,
-                             QGroupBox)
+                             QGroupBox, QCheckBox)
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QColor
-from models import Bill, Appointment, Pet, Service
+from models import Bill, Appointment, Pet, Service, Member, Inventory
 from modules import BillingEngine, PricingEngine
 
 
@@ -37,8 +37,9 @@ class GenerateBillDialog(QDialog):
         super().__init__(parent)
         self.appointment = appointment
         self._price_info = None
+        self._member = None
         self.setWindowTitle('💸 生成账单')
-        self.resize(460, 560)
+        self.resize(480, 680)
         self._build()
 
     def _build(self):
@@ -59,6 +60,51 @@ class GenerateBillDialog(QDialog):
             fl.addRow('时段:', QLabel(f'{self.appointment.start_time} ~ {self.appointment.end_time}'))
             root.addWidget(info_box)
 
+        member_box = QGroupBox('会员 & 支付方式')
+        member_box.setStyleSheet('QGroupBox{font-weight:bold;color:#374151;border:1px solid #e5e7eb;border-radius:8px;margin-top:12px;padding-top:14px;}QGroupBox::title{subcontrol-origin:margin;left:14px;padding:0 6px;}')
+        mf = QFormLayout(member_box)
+        mf.setSpacing(10)
+        self.cb_member = QComboBox()
+        self.cb_member.addItem('— 非会员 —', None)
+        default_member_id = None
+        if self.appointment:
+            pet = Pet.get(self.appointment.pet_id)
+            if pet and pet.member_id:
+                default_member_id = pet.member_id
+        for m in Member.list():
+            self.cb_member.addItem(f'{m.level} | {m.owner_name} ({m.owner_phone})', m.id)
+        self.cb_member.currentIndexChanged.connect(self._on_member_changed)
+        mf.addRow('会员:', self.cb_member)
+        if default_member_id:
+            for i in range(self.cb_member.count()):
+                if self.cb_member.itemData(i) == default_member_id:
+                    self.cb_member.setCurrentIndex(i)
+                    break
+        self.lbl_member_info = QLabel('')
+        self.lbl_member_info.setStyleSheet('color:#2563eb; font-size:12px; padding:4px 0;')
+        mf.addRow('', self.lbl_member_info)
+
+        self.chk_use_balance = QCheckBox('使用会员余额抵扣')
+        self.chk_use_balance.setStyleSheet('QCheckBox{font-weight:bold;}')
+        self.chk_use_balance.toggled.connect(self._on_member_changed)
+        mf.addRow('', self.chk_use_balance)
+
+        self.sp_balance_used = QDoubleSpinBox()
+        self.sp_balance_used.setRange(0, 99999)
+        self.sp_balance_used.setDecimals(2)
+        self.sp_balance_used.setPrefix('¥ ')
+        self.sp_balance_used.valueChanged.connect(self._calc_pay)
+        mf.addRow('余额抵扣:', self.sp_balance_used)
+
+        self.lbl_points_preview = QLabel('')
+        self.lbl_points_preview.setStyleSheet('color:#059669; font-size:12px; font-weight:bold; padding:2px 0;')
+        mf.addRow('赠送积分:', self.lbl_points_preview)
+
+        self.lbl_cash_pay = QLabel('')
+        self.lbl_cash_pay.setStyleSheet('color:#ef4444; font-size:13px; font-weight:bold; padding:4px 0;')
+        mf.addRow('现金/扫码支付:', self.lbl_cash_pay)
+        root.addWidget(member_box)
+
         form_box = QGroupBox('计费参数')
         form_box.setStyleSheet('QGroupBox{font-weight:bold;color:#374151;border:1px solid #e5e7eb;border-radius:8px;margin-top:12px;padding-top:14px;}QGroupBox::title{subcontrol-origin:margin;left:14px;padding:0 6px;}')
         form = QFormLayout(form_box)
@@ -78,15 +124,15 @@ class GenerateBillDialog(QDialog):
 
         self.te_extra = QTextEdit()
         self.te_extra.setPlaceholderText('每行一个额外项目：项目名=金额，例如：\n指甲修剪=20\n耳道清洁=15')
-        self.te_extra.setFixedHeight(70)
+        self.te_extra.setFixedHeight(60)
         self.te_extra.textChanged.connect(self._calc)
         form.addRow('额外项目:', self.te_extra)
         root.addWidget(form_box)
 
-        btn_calc = QPushButton('🧮 重新计算')
-        btn_calc.setStyleSheet(_btn_secondary())
-        btn_calc.clicked.connect(self._calc)
-        root.addWidget(btn_calc)
+        self.lbl_inv_warn = QLabel('')
+        self.lbl_inv_warn.setStyleSheet('color:#ef4444; font-weight:bold; font-size:13px; padding:6px 10px; background:#fef2f2; border-radius:6px;')
+        self.lbl_inv_warn.setVisible(False)
+        root.addWidget(self.lbl_inv_warn)
 
         price_box = QGroupBox('费用明细')
         price_box.setStyleSheet('QGroupBox{font-weight:bold;color:#374151;border:1px solid #e5e7eb;border-radius:8px;margin-top:12px;padding-top:14px;}QGroupBox::title{subcontrol-origin:margin;left:14px;padding:0 6px;}')
@@ -128,6 +174,45 @@ class GenerateBillDialog(QDialog):
 
         self._calc()
 
+    def _on_member_changed(self):
+        mid = self.cb_member.currentData()
+        if mid:
+            m = Member.get(mid)
+            self._member = m
+            if m:
+                self.lbl_member_info.setText(f'  余额 ¥{m.balance:.2f} · 积分 {m.points}')
+                if not self.chk_use_balance.isChecked():
+                    self.chk_use_balance.setChecked(True)
+            else:
+                self.lbl_member_info.setText('')
+        else:
+            self._member = None
+            self.lbl_member_info.setText('')
+        self._calc_pay()
+
+    def _calc_pay(self):
+        final = self._price_info['final_amount'] if self._price_info else 0
+        if self._member and self.chk_use_balance.isChecked():
+            max_use = min(self._member.balance, final)
+            if self.sp_balance_used.value() > self._member.balance + 0.01:
+                self.sp_balance_used.blockSignals(True)
+                self.sp_balance_used.setValue(max_use)
+                self.sp_balance_used.blockSignals(False)
+            if self.sp_balance_used.value() < 0.01:
+                self.sp_balance_used.blockSignals(True)
+                self.sp_balance_used.setValue(max_use)
+                self.sp_balance_used.blockSignals(False)
+            used = self.sp_balance_used.value()
+            points = int(used)
+            self.lbl_points_preview.setText(f'+{points} 积分（1元=1积分，按实际消费赠送）')
+            self.lbl_cash_pay.setText(f'¥{max(0, final - used):.2f}')
+            self.sp_balance_used.setEnabled(True)
+        else:
+            self.lbl_points_preview.setText('非会员或不使用余额，无积分赠送')
+            self.lbl_cash_pay.setText(f'¥{final:.2f}')
+            self.sp_balance_used.setValue(0)
+            self.sp_balance_used.setEnabled(False)
+
     def _parse_extra(self):
         items = {}
         txt = self.te_extra.toPlainText().strip()
@@ -154,11 +239,11 @@ class GenerateBillDialog(QDialog):
         if info:
             self.l_base.setText(f'¥{info["base_price"]:.2f}')
             self.l_cap.setText(f'¥{info["cap_price"]:.2f}')
-            self.l_ws.setText(f'+¥{info.get("weight_surcharge",0):.2f}' if info.get('weight_surcharge') else '¥0.00')
-            self.l_sp.setText(f'+¥{info.get("species_surcharge",0):.2f}' if info.get('species_surcharge') else '¥0.00')
-            self.l_ot.setText(f'+¥{info.get("overtime_surcharge",0):.2f}' if info.get('overtime_surcharge') else '¥0.00')
-            self.l_ex.setText(f'+¥{info.get("extra_items_surcharge",0):.2f}' if info.get('extra_items_surcharge') else '¥0.00')
-            self.l_disc.setText(f'-¥{info.get("discount_amount",0):.2f}' if info.get('discount_amount') else '¥0.00')
+            self.l_ws.setText(f'+¥{info.get("weight_surcharge",0):.2f}' if info.get("weight_surcharge") else '¥0.00')
+            self.l_sp.setText(f'+¥{info.get("species_surcharge",0):.2f}' if info.get("species_surcharge") else '¥0.00')
+            self.l_ot.setText(f'+¥{info.get("overtime_surcharge",0):.2f}' if info.get("overtime_surcharge") else '¥0.00')
+            self.l_ex.setText(f'+¥{info.get("extra_items_surcharge",0):.2f}' if info.get("extra_items_surcharge") else '¥0.00')
+            self.l_disc.setText(f'-¥{info.get("discount_amount",0):.2f}' if info.get("discount_amount") else '¥0.00')
             self.l_final.setText(f'¥{info["final_amount"]:.2f}')
             notes = []
             if info.get('price_capped'):
@@ -167,6 +252,14 @@ class GenerateBillDialog(QDialog):
                 notes.append('📦 套餐一口价')
             notes.extend(info.get('bound_warnings', []))
             self.l_note.setText(' | '.join(notes))
+        # 检查库存
+        ok, warns = Inventory.check_service_inventory(self.appointment.service_id)
+        if not ok:
+            self.lbl_inv_warn.setText('⚠️ 库存不足: ' + '，'.join(warns))
+            self.lbl_inv_warn.setVisible(True)
+        else:
+            self.lbl_inv_warn.setVisible(False)
+        self._calc_pay()
 
     def _confirm(self):
         if not self.appointment:
@@ -175,11 +268,22 @@ class GenerateBillDialog(QDialog):
         if not self._price_info:
             QMessageBox.warning(self, '提示', '请先计算费用')
             return
+        mid = self.cb_member.currentData()
+        use_balance = self.chk_use_balance.isChecked()
+        balance_used = self.sp_balance_used.value() if (mid and use_balance) else 0
+        if mid and use_balance:
+            m = Member.get(mid)
+            if m and balance_used > m.balance + 0.01:
+                QMessageBox.warning(self, '余额不足',
+                                    f'会员 {m.owner_name} 当前余额 ¥{m.balance:.2f}，不足以抵扣 ¥{balance_used:.2f}')
+                return
         bill, info = BillingEngine.generate_bill(
             self.appointment.id,
             overtime_minutes=self.sp_overtime.value(),
             extra_items=self._parse_extra(),
-            discount_amount=self.sp_discount.value()
+            discount_amount=self.sp_discount.value(),
+            member_id=mid,
+            balance_used=balance_used
         )
         if bill:
             self._saved_bill_id = bill.id
@@ -192,7 +296,7 @@ class GenerateBillDialog(QDialog):
     def _show_receipt(self, text):
         dlg = QDialog(self)
         dlg.setWindowTitle('🧾 账单已生成')
-        dlg.resize(500, 640)
+        dlg.resize(500, 680)
         lay = QVBoxLayout(dlg)
         lay.setContentsMargins(16, 16, 16, 16)
         te = QTextEdit()
@@ -229,7 +333,7 @@ class ReceiptDialog(QDialog):
     def __init__(self, parent, receipt_text, bill_id=None):
         super().__init__(parent)
         self.setWindowTitle('🧾 消费账单')
-        self.resize(500, 660)
+        self.resize(500, 680)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 16, 16, 16)
         te = QTextEdit()
@@ -324,7 +428,7 @@ class BillingPage(QWidget):
             QTableWidget::item { padding: 6px 10px; }
             QHeaderView::section { background:#f9fafb; padding:10px; border:none; border-bottom:2px solid #e5e7eb; color:#374151; font-weight:bold; }
         ''')
-        hd = ['ID', '开单时间', '宠物', '主人', '项目', '工位', '原价', '折扣', '实付', '状态', '封顶', '操作']
+        hd = ['ID', '开单时间', '宠物', '会员', '项目', '原价', '抵扣', '实付', '积分', '状态', '操作']
         self.table.setColumnCount(len(hd))
         self.table.setHorizontalHeaderLabels(hd)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -347,9 +451,10 @@ class BillingPage(QWidget):
             f'📈 区间统计: 共 {stats.get("bill_count",0)} 单 · '
             f'总金额 ¥{stats.get("total_amount",0):.2f} · '
             f'已收 ¥{stats.get("paid_total",0):.2f} · '
-            f'待收 ¥{stats.get("unpaid_total",0):.2f} · '
-            f'封顶计费 {stats.get("cap_count",0)} 单  |  '
-            f'宠物总数: {stats.get("pet_count",0)} 只 · 工位: {stats.get("workstation_count",0)} 个'
+            f'待收 ¥{stats.get("unpaid_total",0):.2f}  |  '
+            f'👥 会员储值 ¥{stats.get("member_total_balance",0):.2f} · '
+            f'📦 低库存 {stats.get("low_stock_count",0)} 项 · '
+            f'🧴 近7天耗材 ¥{stats.get("inv_consumed_value_7d",0):.2f}'
         )
         self.table.setRowCount(len(bills))
         status_map = {
@@ -358,27 +463,29 @@ class BillingPage(QWidget):
             'refund': ('↩️已退款', '#6b7280')
         }
         for row, b in enumerate(bills):
+            member_name = b.get('member_name', '') or '非会员'
             vals = [
                 f'B{b["id"]:08d}',
                 (b['created_at'] or '').split('.')[0][:16],
                 b.get('pet_name', ''),
-                b.get('owner_name', ''),
+                member_name,
                 b.get('service_name', ''),
-                b.get('ws_name', '-'),
                 f'¥{b["base_amount"]:.2f}',
-                f'-¥{b["discount_amount"]:.2f}' if b['discount_amount'] else '-',
+                f'-¥{b.get("balance_used",0):.2f}' if b.get("balance_used") else '-',
                 f'¥{b["final_amount"]:.2f}',
-                status_map.get(b['paid_status'], (b['paid_status'], '#000'))[0],
-                '🔒 是' if b.get('price_capped') else ''
+                f'+{b.get("points_awarded",0)}' if b.get("points_awarded") else '-',
+                status_map.get(b['paid_status'], (b['paid_status'], '#000'))[0]
             ]
             for c, v in enumerate(vals):
                 it = QTableWidgetItem(v)
                 if c == 9:
                     it.setForeground(QColor(status_map.get(b['paid_status'], ('', '#000'))[1]))
-                if c == 8:
+                if c == 7:
                     f = self.table.font()
                     f.setBold(True)
                     it.setFont(f)
+                if c == 3 and b.get("member_name"):
+                    it.setForeground(QColor('#2563eb'))
                 self.table.setItem(row, c, it)
 
             opf = QFrame()
@@ -394,7 +501,7 @@ class BillingPage(QWidget):
                 bpay.setStyleSheet(_btn_green())
                 bpay.clicked.connect(lambda _, _id=b['id']: self._on_pay(_id))
                 ol.addWidget(bpay)
-            self.table.setCellWidget(row, 11, opf)
+            self.table.setCellWidget(row, 10, opf)
             self.table.setRowHeight(row, 42)
         self.lbl.setText(f'共 {len(bills)} 条账单记录')
 

@@ -13,7 +13,8 @@ class Bill:
                  paid_at=None, created_at=None,
                  overtime_minutes=0, overtime_fee=0,
                  weight_surcharge=0, species_surcharge=0,
-                 extra_items_text='', extra_items_fee=0):
+                 extra_items_text='', extra_items_fee=0,
+                 member_id=None, balance_used=0, points_awarded=0):
         self.id = id
         self.appointment_id = appointment_id
         self.pet_id = pet_id
@@ -32,6 +33,9 @@ class Bill:
         self.species_surcharge = species_surcharge
         self.extra_items_text = extra_items_text
         self.extra_items_fee = extra_items_fee
+        self.member_id = member_id
+        self.balance_used = float(balance_used or 0)
+        self.points_awarded = int(points_awarded or 0)
 
     @staticmethod
     def add(bill_data):
@@ -41,8 +45,8 @@ class Bill:
             """INSERT INTO bills(appointment_id,pet_id,service_id,workstation_id,
                base_amount,discount_amount,final_amount,price_capped,paid_status,
                overtime_minutes,overtime_fee,weight_surcharge,species_surcharge,
-               extra_items_text,extra_items_fee)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               extra_items_text,extra_items_fee,member_id,balance_used,points_awarded)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (bill_data['appointment_id'], bill_data['pet_id'], bill_data['service_id'],
              bill_data.get('workstation_id'), bill_data['base_amount'],
              bill_data.get('discount_amount', 0), bill_data['final_amount'],
@@ -53,7 +57,10 @@ class Bill:
              bill_data.get('weight_surcharge', 0),
              bill_data.get('species_surcharge', 0),
              bill_data.get('extra_items_text', ''),
-             bill_data.get('extra_items_fee', 0))
+             bill_data.get('extra_items_fee', 0),
+             bill_data.get('member_id'),
+             bill_data.get('balance_used', 0),
+             bill_data.get('points_awarded', 0))
         )
         db.commit()
         return cur.lastrowid
@@ -91,12 +98,14 @@ class Bill:
         sql = """
             SELECT b.*, a.start_time, a.end_time,
                    p.name as pet_name, p.owner_name, p.owner_phone,
-                   w.name as ws_name, s.name as service_name
+                   w.name as ws_name, s.name as service_name,
+                   m.owner_name as member_name, m.level as member_level
             FROM bills b
             LEFT JOIN appointments a ON b.appointment_id = a.id
             LEFT JOIN pets p ON b.pet_id = p.id
             LEFT JOIN workstations w ON b.workstation_id = w.id
             LEFT JOIN services s ON b.service_id = s.id
+            LEFT JOIN members m ON b.member_id = m.id
             WHERE 1=1
         """
         params = []
@@ -191,5 +200,8 @@ class Bill:
             'weight_surcharge': self.weight_surcharge,
             'species_surcharge': self.species_surcharge,
             'extra_items_text': self.extra_items_text,
-            'extra_items_fee': self.extra_items_fee
+            'extra_items_fee': self.extra_items_fee,
+            'member_id': self.member_id,
+            'balance_used': self.balance_used,
+            'points_awarded': self.points_awarded
         }

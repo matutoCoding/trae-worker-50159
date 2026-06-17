@@ -1,9 +1,11 @@
 from .database import Database
+from .member import Member
 
 
 class Pet:
     def __init__(self, id=None, name=None, species=None, breed=None, weight=None,
-                 age=None, owner_name=None, owner_phone=None, notes=None, created_at=None):
+                 age=None, owner_name=None, owner_phone=None, notes=None,
+                 member_id=None, created_at=None):
         self.id = id
         self.name = name
         self.species = species
@@ -13,6 +15,7 @@ class Pet:
         self.owner_name = owner_name
         self.owner_phone = owner_phone
         self.notes = notes
+        self.member_id = member_id
         self.created_at = created_at
 
     @staticmethod
@@ -20,11 +23,12 @@ class Pet:
         db = Database().conn()
         cur = db.cursor()
         cur.execute(
-            "INSERT INTO pets(name,species,breed,weight,age,owner_name,owner_phone,notes) VALUES(?,?,?,?,?,?,?,?)",
+            """INSERT INTO pets(name,species,breed,weight,age,owner_name,owner_phone,notes,member_id)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
             (pet_data['name'], pet_data['species'], pet_data.get('breed'),
              pet_data.get('weight'), pet_data.get('age'),
              pet_data['owner_name'], pet_data['owner_phone'],
-             pet_data.get('notes'))
+             pet_data.get('notes'), pet_data.get('member_id'))
         )
         db.commit()
         return cur.lastrowid
@@ -34,11 +38,12 @@ class Pet:
         db = Database().conn()
         cur = db.cursor()
         cur.execute(
-            """UPDATE pets SET name=?,species=?,breed=?,weight=?,age=?,owner_name=?,owner_phone=?,notes=? WHERE id=?""",
+            """UPDATE pets SET name=?,species=?,breed=?,weight=?,age=?,
+               owner_name=?,owner_phone=?,notes=?,member_id=? WHERE id=?""",
             (pet_data['name'], pet_data['species'], pet_data.get('breed'),
              pet_data.get('weight'), pet_data.get('age'),
              pet_data['owner_name'], pet_data['owner_phone'],
-             pet_data.get('notes'), pet_id)
+             pet_data.get('notes'), pet_data.get('member_id'), pet_id)
         )
         db.commit()
 
@@ -69,10 +74,16 @@ class Pet:
             cur.execute("SELECT * FROM pets ORDER BY created_at DESC")
         return [Pet(**dict(r)) for r in cur.fetchall()]
 
+    def get_member(self):
+        if not self.member_id:
+            return None
+        return Member.get(self.member_id)
+
     def to_dict(self):
         return {
             'id': self.id, 'name': self.name, 'species': self.species,
             'breed': self.breed, 'weight': self.weight, 'age': self.age,
             'owner_name': self.owner_name, 'owner_phone': self.owner_phone,
-            'notes': self.notes, 'created_at': self.created_at
+            'notes': self.notes, 'member_id': self.member_id,
+            'created_at': self.created_at
         }
