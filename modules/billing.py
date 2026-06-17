@@ -56,7 +56,9 @@ class BillingEngine:
         if balance_used > 0 and member and member.balance + 0.01 < balance_used:
             return None, f'会员余额不足，当前余额¥{member.balance:.2f}'
 
-        points_awarded = int(round(max(0, price_info['final_amount'] - balance_used) * BillingEngine.POINTS_PER_YUAN))
+        points_awarded = 0
+        if member:
+            points_awarded = int(round(price_info['final_amount'] * BillingEngine.POINTS_PER_YUAN))
 
         bill_id = Bill.add({
             'appointment_id': appointment_id,
@@ -79,9 +81,14 @@ class BillingEngine:
             'points_awarded': points_awarded
         })
 
-        if balance_used > 0 and member:
-            Member.consume(member.id, balance_used, points_award=points_awarded,
-                           bill_id=bill_id, note=f'开单抵扣¥{balance_used:.2f}')
+        if member:
+            if balance_used > 0:
+                Member.consume(member.id, balance_used, points_award=points_awarded,
+                               bill_id=bill_id,
+                               note=f'开单消费¥{price_info["final_amount"]:.2f}，余额抵扣¥{balance_used:.2f}')
+            elif points_awarded > 0:
+                Member.award_points(member.id, points_awarded, bill_id=bill_id,
+                                    note=f'开单消费¥{price_info["final_amount"]:.2f}，赠送{points_awarded}积分')
 
         inv_result, inv_err = Inventory.deduct_service_inventory(appt.service_id, bill_id=bill_id)
         if inv_err:

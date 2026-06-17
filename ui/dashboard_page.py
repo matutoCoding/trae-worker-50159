@@ -108,49 +108,70 @@ class DashboardPage(QWidget):
         return card
 
     def refresh(self):
-        for i in reversed(range(self.stats_grid.count())):
-            self.stats_grid.itemAt(i).widget().setParent(None)
+        try:
+            for i in reversed(range(self.stats_grid.count())):
+                w = self.stats_grid.itemAt(i).widget()
+                if w:
+                    w.setParent(None)
 
-        df = self.date_from.date().toString('yyyy-MM-dd')
-        dt = self.date_to.date().toString('yyyy-MM-dd')
-        stats = BillingEngine.get_dashboard_stats(df, dt)
+            df = self.date_from.date().toString('yyyy-MM-dd')
+            dt = self.date_to.date().toString('yyyy-MM-dd')
+            stats = BillingEngine.get_dashboard_stats(df, dt)
 
-        bill_count = stats.get('bill_count', 0) or 0
-        total = stats.get('total_amount', 0) or 0
-        paid = stats.get('paid_total', 0) or 0
-        unpaid = stats.get('unpaid_total', 0) or 0
-        cap_count = stats.get('cap_count', 0) or 0
-        pet_count = stats.get('pet_count', 0) or 0
-        ws_count = stats.get('workstation_count', 0) or 0
-        today_count = len(Appointment.list_by_date(QDate.currentDate().toString('yyyy-MM-dd')))
-        member_total_balance = stats.get('member_total_balance', 0) or 0
-        member_count = stats.get('member_count', 0) or 0
-        low_stock_count = stats.get('low_stock_count', 0) or 0
-        inv_consumed_7d = stats.get('inv_consumed_7d', 0) or 0
-        inv_consumed_value_7d = stats.get('inv_consumed_value_7d', 0) or 0
+            bill_count = stats.get('bill_count', 0) or 0
+            total = stats.get('total_amount', 0) or 0
+            paid = stats.get('paid_total', 0) or 0
+            unpaid = stats.get('unpaid_total', 0) or 0
+            cap_count = stats.get('cap_count', 0) or 0
+            pet_count = stats.get('pet_count', 0) or 0
+            ws_count = stats.get('workstation_count', 0) or 0
+            today_count = len(Appointment.list_by_date(QDate.currentDate().toString('yyyy-MM-dd')))
+            member_total_balance = stats.get('member_total_balance', 0) or 0
+            member_count = stats.get('member_count', 0) or 0
+            low_stock_count = stats.get('low_stock_count', 0) or 0
+            inv_consumed_7d = stats.get('inv_consumed_7d', 0) or 0
+            inv_consumed_value_7d = stats.get('inv_consumed_value_7d', 0) or 0
 
-        cards = [
-            ('营业总额', f'¥{total:,.2f}', f'{df} ~ {dt}', '#10b981'),
-            ('已收款', f'¥{paid:,.2f}', '已结清订单', '#3b82f6'),
-            ('待收款', f'¥{unpaid:,.2f}', '未结清订单', '#ef4444'),
-            ('开单数', f'{bill_count} 单', f'封顶单 {cap_count} 单', '#8b5cf6'),
-            ('👥 会员储值', f'¥{member_total_balance:,.2f}', f'会员 {member_count} 名', '#2563eb'),
-            ('🧴 近7天耗材', f'{inv_consumed_7d} 件', f'消耗 ¥{inv_consumed_value_7d:,.2f}', '#0891b2'),
-            ('⚠️ 低库存项目', f'{low_stock_count} 项', '需尽快补货', '#dc2626'),
-            ('今日预约', f'{today_count} 条', '排期订单', '#f59e0b'),
-            ('在档宠物', f'{pet_count} 只', '已建立档案', '#06b6d4'),
-            ('可用工位', f'{ws_count} 个', '当前工位总数', '#ec4899'),
-        ]
-        for i, (t, v, s, c) in enumerate(cards):
-            r, col = divmod(i, 5)
-            self.stats_grid.addWidget(self._stat_card(t, v, s, c), r, col)
+            low_stock_items = stats.get('low_stock_items', []) or []
+            low_sub = '需尽快补货'
+            if low_stock_items:
+                first = low_stock_items[0]
+                low_sub = f'{first.get("name", "?")}: 剩{first.get("stock", 0)}/{first.get("min_stock", 0)}'
+                if len(low_stock_items) > 1:
+                    low_sub += f' 等{low_stock_count}项'
 
-        low_stock_items = stats.get('low_stock_items', []) or []
-        low_text = ''
-        if low_stock_items:
-            low_text = ' | 低库存: ' + '、'.join([f'{it["name"]}(剩{it["current_stock"]})' for it in low_stock_items[:3]])
+            cards = [
+                ('营业总额', f'¥{total:,.2f}', f'{df} ~ {dt}', '#10b981'),
+                ('已收款', f'¥{paid:,.2f}', '已结清订单', '#3b82f6'),
+                ('待收款', f'¥{unpaid:,.2f}', '未结清订单', '#ef4444'),
+                ('开单数', f'{bill_count} 单', f'封顶单 {cap_count} 单', '#8b5cf6'),
+                ('👥 会员储值', f'¥{member_total_balance:,.2f}', f'会员 {member_count} 名', '#2563eb'),
+                ('🧴 近7天耗材', f'{inv_consumed_7d} 件', f'消耗 ¥{inv_consumed_value_7d:,.2f}', '#0891b2'),
+                ('⚠️ 低库存项目', f'{low_stock_count} 项', low_sub, '#dc2626'),
+                ('今日预约', f'{today_count} 条', '排期订单', '#f59e0b'),
+                ('在档宠物', f'{pet_count} 只', '已建立档案', '#06b6d4'),
+                ('可用工位', f'{ws_count} 个', '当前工位总数', '#ec4899'),
+            ]
+            for i, (t, v, s, c) in enumerate(cards):
+                r, col = divmod(i, 5)
+                self.stats_grid.addWidget(self._stat_card(t, v, s, c), r, col)
 
-        self.info_label.setText(
-            f'统计区间: {df} 至 {dt}  |  营业 ¥{total:,.2f}  |  预约 {today_count} 单  |  在档宠物 {pet_count} 只'
-            f'  |  会员储值 ¥{member_total_balance:,.2f}  |  近7天耗材 ¥{inv_consumed_value_7d:,.2f}{low_text}'
-        )
+            low_parts = []
+            if low_stock_items:
+                for it in low_stock_items[:5]:
+                    name = it.get('name', '?')
+                    stock = it.get('stock', 0)
+                    min_stock = it.get('min_stock', 0)
+                    low_parts.append(f'{name}(剩{stock}/安全{min_stock})')
+            low_text = ''
+            if low_parts:
+                low_text = ' | ⚠️ 低库存: ' + '，'.join(low_parts)
+
+            self.info_label.setText(
+                f'统计区间: {df} 至 {dt}  |  营业 ¥{total:,.2f}  |  预约 {today_count} 单  |  在档宠物 {pet_count} 只'
+                f'  |  会员储值 ¥{member_total_balance:,.2f}  |  近7天耗材 ¥{inv_consumed_value_7d:,.2f}{low_text}'
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.info_label.setText(f'⚠️ 统计加载出现异常: {e}')

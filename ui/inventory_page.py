@@ -57,7 +57,14 @@ class InventoryFormDialog(QDialog):
         self.sp_stock = QSpinBox()
         self.sp_stock.setRange(0, 99999)
         self.sp_stock.setValue(self.inv.stock if self.inv else 0)
-        lay.addRow('当前库存:', self.sp_stock)
+        if self.inv:
+            self.sp_stock.setEnabled(False)
+            lay.addRow('当前库存:', self.sp_stock)
+            hint = QLabel('⚠️ 编辑模式下不可直接改库存，请用"入库"或"盘点"功能')
+            hint.setStyleSheet('color:#f59e0b; font-size:11px; padding:2px 0;')
+            lay.addRow('', hint)
+        else:
+            lay.addRow('初始库存:', self.sp_stock)
 
         self.sp_min = QSpinBox()
         self.sp_min.setRange(0, 99999)
@@ -157,6 +164,85 @@ class StockInDialog(QDialog):
             'quantity': self.sp_qty.value(),
             'unit_price': self.sp_price.value(),
             'note': self.ed_note.text().strip()
+        }
+        self.accept()
+
+
+class StockAdjustDialog(QDialog):
+    def __init__(self, parent=None, inv=None):
+        super().__init__(parent)
+        self.inv = inv
+        self.result = {}
+        self.setWindowTitle(f'库存盘点 - {inv.name}' if inv else '库存盘点')
+        self.resize(380, 280)
+        self._build()
+
+    def _build(self):
+        lay = QFormLayout(self)
+        lay.setContentsMargins(24, 24, 24, 24)
+        lay.setSpacing(14)
+
+        info = QLabel(f'当前系统库存: {self.inv.stock} {self.inv.unit}' if self.inv else '')
+        info.setStyleSheet('color:#374151; font-weight:bold;')
+        lay.addRow(info)
+
+        self.sp_actual = QSpinBox()
+        self.sp_actual.setRange(0, 99999)
+        self.sp_actual.setValue(self.inv.stock if self.inv else 0)
+        self.sp_actual.valueChanged.connect(self._update_diff)
+        lay.addRow('实际盘点数量*:', self.sp_actual)
+
+        self.lbl_diff = QLabel('')
+        self.lbl_diff.setStyleSheet('color:#6b7280; font-size:12px; padding:4px 0;')
+        lay.addRow('差异:', self.lbl_diff)
+
+        self.cb_reason = QComboBox()
+        for r in ['正常损耗', '盘盈', '盘亏', '过期报损', '其他原因']:
+            self.cb_reason.addItem(r)
+        lay.addRow('原因:', self.cb_reason)
+
+        self.ed_note = QLineEdit()
+        self.ed_note.setPlaceholderText('可补充说明盘点详情')
+        lay.addRow('备注:', self.ed_note)
+
+        btn_row = QHBoxLayout()
+        btn_cancel = QPushButton('取消')
+        btn_cancel.setStyleSheet(_btn_secondary())
+        btn_cancel.clicked.connect(self.reject)
+        btn_ok = QPushButton('确认盘点')
+        btn_ok.setStyleSheet(_btn_primary())
+        btn_ok.clicked.connect(self._ok)
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_ok)
+        lay.addRow(btn_row)
+
+        self._update_diff()
+
+    def _update_diff(self):
+        if not self.inv:
+            return
+        diff = self.sp_actual.value() - self.inv.stock
+        if diff > 0:
+            self.lbl_diff.setText(f'<span style="color:#10b981;">盘盈 +{diff} {self.inv.unit}</span>')
+        elif diff < 0:
+            self.lbl_diff.setText(f'<span style="color:#ef4444;">盘亏 {diff} {self.inv.unit}</span>')
+        else:
+            self.lbl_diff.setText('<span style="color:#6b7280;">账实相符，无差异</span>')
+
+    def _ok(self):
+        if self.sp_actual.value() < 0:
+            QMessageBox.warning(self, '提示', '库存数量不能为负')
+            return
+        diff = self.sp_actual.value() - (self.inv.stock if self.inv else 0)
+        reason = self.cb_reason.currentText()
+        note = self.ed_note.text().strip()
+        full_note = f'[{reason}] {note}' if note else f'[{reason}] 盘点调整'
+        self.result = {
+            'actual_stock': self.sp_actual.value(),
+            'diff': diff,
+            'reason': reason,
+            'note': full_note
         }
         self.accept()
 
@@ -299,21 +385,27 @@ class InventoryPage(QWidget):
             op_w = QWidget()
             op_lay = QHBoxLayout(op_w)
             op_lay.setContentsMargins(0, 0, 0, 0)
-            op_lay.setSpacing(6)
+            op_lay.setSpacing(4)
             btn_in = QPushButton('入库')
             btn_in.setStyleSheet(_btn_primary())
-            btn_in.setFixedWidth(60)
+            btn_in.setFixedWidth(50)
             btn_in.clicked.connect(lambda _, i=inv: self._on_stock_in(i))
+            btn_adj = QPushButton('盘点')
+            btn_adj.setStyleSheet('''QPushButton{background:#0ea5e9; color:#fff; padding:6px 10px; border-radius:5px; border:none;}
+                                     QPushButton:hover{background:#0284c7;}''')
+            btn_adj.setFixedWidth(50)
+            btn_adj.clicked.connect(lambda _, i=inv: self._on_stock_adjust(i))
             btn_edit = QPushButton('编辑')
             btn_edit.setStyleSheet(_btn_secondary())
-            btn_edit.setFixedWidth(60)
+            btn_edit.setFixedWidth(50)
             btn_edit.clicked.connect(lambda _, i=inv: self._on_edit(i))
             btn_del = QPushButton('删除')
             btn_del.setStyleSheet(_btn_danger())
-            btn_del.setFixedWidth(60)
+            btn_del.setFixedWidth(50)
             btn_del.clicked.connect(lambda _, i=inv: self._on_del(i))
             op_lay.addStretch(1)
             op_lay.addWidget(btn_in)
+            op_lay.addWidget(btn_adj)
             op_lay.addWidget(btn_edit)
             op_lay.addWidget(btn_del)
             self.table.setCellWidget(r, 7, op_w)
@@ -350,18 +442,31 @@ class InventoryPage(QWidget):
             return
         inv_id = item.data(Qt.ItemDataRole.UserRole)
         txs = InventoryTransaction.list_by_inventory(inv_id, limit=200)
+        type_map = {
+            'stock_in': '📥 入库',
+            'stock_out': '📤 出库',
+            'service_use': '🛁 服务消耗',
+            'adjust_in': '📊 盘盈',
+            'adjust_out': '📊 盘亏',
+        }
         self.tx_table.setRowCount(0)
         for tx in txs:
             r = self.tx_table.rowCount()
             self.tx_table.insertRow(r)
-            qty = tx.get('quantity', 0)
+            qty = tx.quantity
             qty_str = f'+{qty}' if qty > 0 else str(qty)
-            self.tx_table.setItem(r, 0, QTableWidgetItem(tx.get('created_at', '')))
-            self.tx_table.setItem(r, 1, QTableWidgetItem(tx.get('type', '')))
-            self.tx_table.setItem(r, 2, QTableWidgetItem(qty_str))
-            self.tx_table.setItem(r, 3, QTableWidgetItem(f"{tx.get('stock_after',0)} {tx.get('inv_unit','')}"))
-            self.tx_table.setItem(r, 4, QTableWidgetItem(f"¥{tx.get('unit_price',0):.2f}"))
-            self.tx_table.setItem(r, 5, QTableWidgetItem(tx.get('note', '') or ''))
+            qty_item = QTableWidgetItem(qty_str)
+            if qty > 0:
+                qty_item.setForeground(Qt.GlobalColor.darkGreen)
+            elif qty < 0:
+                qty_item.setForeground(Qt.GlobalColor.red)
+            time_str = (tx.created_at or '').split('.')[0]
+            self.tx_table.setItem(r, 0, QTableWidgetItem(time_str))
+            self.tx_table.setItem(r, 1, QTableWidgetItem(type_map.get(tx.type_, tx.type_)))
+            self.tx_table.setItem(r, 2, qty_item)
+            self.tx_table.setItem(r, 3, QTableWidgetItem(f'{tx.stock_after}'))
+            self.tx_table.setItem(r, 4, QTableWidgetItem(f'¥{tx.unit_price:.2f}'))
+            self.tx_table.setItem(r, 5, QTableWidgetItem(tx.note or ''))
 
     def _on_add(self):
         d = InventoryFormDialog(self)
@@ -384,9 +489,43 @@ class InventoryPage(QWidget):
                 QMessageBox.warning(self, '入库失败', err)
             self.refresh()
 
+    def _on_stock_adjust(self, inv):
+        d = StockAdjustDialog(self, inv)
+        if d.exec():
+            res = d.result
+            new_inv, err = Inventory.stock_adjust(inv.id, res['actual_stock'], res['note'])
+            if err:
+                QMessageBox.warning(self, '盘点失败', err)
+            else:
+                diff = res['diff']
+                if diff > 0:
+                    msg = f'盘盈 +{diff} {inv.unit}\n盘点后库存: {new_inv.stock} {inv.unit}'
+                elif diff < 0:
+                    msg = f'盘亏 {diff} {inv.unit}\n盘点后库存: {new_inv.stock} {inv.unit}'
+                else:
+                    msg = f'账实相符，无变化\n库存: {new_inv.stock} {inv.unit}'
+                QMessageBox.information(self, '盘点完成', msg)
+            self.refresh()
+
     def _on_del(self, inv):
-        r = QMessageBox.question(self, '确认删除', f'确定删除耗材「{inv.name}」？',
-                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        links = ServiceInventoryLink.list_by_inventory(inv.id)
+        tx_count = len(InventoryTransaction.list_by_inventory(inv.id, limit=1))
+        reasons = []
+        if links:
+            reasons.append(f'被 {len(links)} 个服务项目关联')
+        if tx_count > 0:
+            reasons.append(f'有 {tx_count} 条流水记录')
+        if reasons:
+            QMessageBox.warning(
+                self, '无法删除',
+                f'耗材「{inv.name}」无法删除：\n  • ' + '\n  • '.join(reasons)
+                + '\n\n建议将耗材标记到备注中归档，历史记录仍可正常查看。'
+            )
+            return
+        r = QMessageBox.question(self, '确认删除',
+                                 f'确定删除耗材「{inv.name}」？\n该耗材无任何关联记录，删除后不可恢复。',
+                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                 QMessageBox.StandardButton.No)
         if r == QMessageBox.StandardButton.Yes:
             Inventory.delete(inv.id)
             self.refresh()

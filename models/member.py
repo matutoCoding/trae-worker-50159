@@ -95,9 +95,9 @@ class Member:
                    (new_balance, new_total, member_id))
         tx_id = MemberTransaction.add({
             'member_id': member_id,
-            'type': '充值',
+            'type': 'recharge',
             'amount': amount,
-            'points': 0,
+            'points_delta': 0,
             'balance_after': new_balance,
             'points_after': member.points,
             'note': note or f'充值¥{amount:.2f}'
@@ -107,13 +107,13 @@ class Member:
 
     @staticmethod
     def consume(member_id, amount, points_award=0, bill_id=None, note=''):
-        if amount <= 0:
-            return None, '消费金额必须大于0'
+        if amount < 0:
+            return None, '消费金额不能为负'
         db = Database().conn()
         member = Member.get(member_id)
         if not member:
             return None, '会员不存在'
-        if member.balance + 0.01 < amount:
+        if amount > 0 and member.balance + 0.01 < amount:
             return None, f'余额不足，当前余额¥{member.balance:.2f}'
         new_balance = round(member.balance - amount, 2)
         new_points = member.points + int(points_award or 0)
@@ -122,13 +122,37 @@ class Member:
                    (new_balance, new_points, new_spent, member_id))
         tx_id = MemberTransaction.add({
             'member_id': member_id,
-            'type': '消费',
-            'amount': -abs(amount),
-            'points': int(points_award or 0),
+            'type': 'consume',
+            'amount': -abs(amount) if amount > 0 else 0,
+            'points_delta': int(points_award or 0),
             'balance_after': new_balance,
             'points_after': new_points,
             'bill_id': bill_id,
-            'note': note or f'消费¥{amount:.2f}'
+            'note': note or (f'消费¥{amount:.2f}' if amount > 0 else '积分赠送')
+        })
+        db.commit()
+        return Member.get(member_id), None
+
+    @staticmethod
+    def award_points(member_id, points, bill_id=None, note=''):
+        if points <= 0:
+            return None, '赠送积分必须大于0'
+        db = Database().conn()
+        member = Member.get(member_id)
+        if not member:
+            return None, '会员不存在'
+        new_points = member.points + int(points)
+        db.execute("UPDATE members SET points=? WHERE id=?",
+                   (new_points, member_id))
+        MemberTransaction.add({
+            'member_id': member_id,
+            'type': 'award',
+            'amount': 0,
+            'points_delta': int(points),
+            'balance_after': member.balance,
+            'points_after': new_points,
+            'bill_id': bill_id,
+            'note': note or f'赠送{points}积分'
         })
         db.commit()
         return Member.get(member_id), None
@@ -152,6 +176,18 @@ class Member:
         row = db.execute("SELECT COALESCE(SUM(balance),0) FROM members").fetchone()
         return row[0] if row else 0
 
+    @staticmethod
+    def count_pets(member_id):
+        db = Database().conn()
+        row = db.execute("SELECT COUNT(*) FROM pets WHERE member_id=?", (member_id,)).fetchone()
+        return row[0] if row else 0
+
+    @staticmethod
+    def count_bills(member_id):
+        db = Database().conn()
+        row = db.execute("SELECT COUNT(*) FROM bills WHERE member_id=?", (member_id,)).fetchone()
+        return row[0] if row else 0
+
     def to_dict(self):
         return {
             'id': self.id, 'owner_name': self.owner_name,
@@ -164,14 +200,14 @@ class Member:
 
 
 class MemberTransaction:
-    def __init__(self, id=None, member_id=None, type='', amount=0, points=0,
+    def __init__(self, id=None, member_id=None, type='', amount=0, points_delta=0,
                  balance_after=0, points_after=0, bill_id=None, note='',
                  created_at=None):
         self.id = id
         self.member_id = member_id
-        self.type = type
+        self.type_ = type
         self.amount = amount
-        self.points = points
+        self.points_delta = points_delta
         self.balance_after = balance_after
         self.points_after = points_after
         self.bill_id = bill_id
@@ -189,7 +225,7 @@ class MemberTransaction:
         """, (
             data['member_id'], data['type'],
             float(data.get('amount', 0)),
-            int(data.get('points', 0)),
+            int(data.get('points_delta', 0)),
             float(data.get('balance_after', 0)),
             int(data.get('points_after', 0)),
             data.get('bill_id'),
@@ -203,8 +239,23 @@ class MemberTransaction:
         db = Database().conn()
         cur = db.cursor()
         cur.execute("""
-            SELECT mt.*, b.id as bill_ref FROM member_transactions mt
-            LEFT JOIN bills b ON mt.bill_id = b.id
-            WHERE mt.member_id=? ORDER BY mt.created_at DESC LIMIT ?
+            SELECT * FROM member_transactions
+            WHERE member_id=? ORDER BY created_at DESC LIMIT ?
         """, (member_id, limit))
-        return [dict(r) for r in cur.fetchall()]
+        rows = cur.fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            results.append(MemberTransaction(
+                id=d.get('id'),
+                member_id=d.get('member_id'),
+                type=d.get('type', ''),
+                amount=d.get('amount', 0),
+                points_delta=d.get('points', 0),
+                balance_after=d.get('balance_after', 0),
+                points_after=d.get('points_after', 0),
+                bill_id=d.get('bill_id'),
+                note=d.get('note', ''),
+                created_at=d.get('created_at')
+            ))
+        return results

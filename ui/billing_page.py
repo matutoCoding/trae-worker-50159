@@ -192,23 +192,29 @@ class GenerateBillDialog(QDialog):
 
     def _calc_pay(self):
         final = self._price_info['final_amount'] if self._price_info else 0
-        if self._member and self.chk_use_balance.isChecked():
-            max_use = min(self._member.balance, final)
-            if self.sp_balance_used.value() > self._member.balance + 0.01:
-                self.sp_balance_used.blockSignals(True)
-                self.sp_balance_used.setValue(max_use)
-                self.sp_balance_used.blockSignals(False)
-            if self.sp_balance_used.value() < 0.01:
-                self.sp_balance_used.blockSignals(True)
-                self.sp_balance_used.setValue(max_use)
-                self.sp_balance_used.blockSignals(False)
-            used = self.sp_balance_used.value()
-            points = int(used)
-            self.lbl_points_preview.setText(f'+{points} 积分（1元=1积分，按实际消费赠送）')
-            self.lbl_cash_pay.setText(f'¥{max(0, final - used):.2f}')
-            self.sp_balance_used.setEnabled(True)
+        if self._member:
+            total_points = int(final)
+            if self.chk_use_balance.isChecked():
+                max_use = min(self._member.balance, final)
+                if self.sp_balance_used.value() > self._member.balance + 0.01:
+                    self.sp_balance_used.blockSignals(True)
+                    self.sp_balance_used.setValue(max_use)
+                    self.sp_balance_used.blockSignals(False)
+                if self.sp_balance_used.value() < 0.01:
+                    self.sp_balance_used.blockSignals(True)
+                    self.sp_balance_used.setValue(max_use)
+                    self.sp_balance_used.blockSignals(False)
+                used = self.sp_balance_used.value()
+                self.lbl_points_preview.setText(f'+{total_points} 积分（1元=1积分，按消费总额赠送）')
+                self.lbl_cash_pay.setText(f'¥{max(0, final - used):.2f}')
+                self.sp_balance_used.setEnabled(True)
+            else:
+                self.lbl_points_preview.setText(f'+{total_points} 积分（1元=1积分，按消费总额赠送）')
+                self.lbl_cash_pay.setText(f'¥{final:.2f}')
+                self.sp_balance_used.setValue(0)
+                self.sp_balance_used.setEnabled(False)
         else:
-            self.lbl_points_preview.setText('非会员或不使用余额，无积分赠送')
+            self.lbl_points_preview.setText('非会员无积分赠送')
             self.lbl_cash_pay.setText(f'¥{final:.2f}')
             self.sp_balance_used.setValue(0)
             self.sp_balance_used.setEnabled(False)

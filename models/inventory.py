@@ -88,7 +88,7 @@ class Inventory:
         db.execute("UPDATE inventory SET stock=?, unit_price=? WHERE id=?",
                    (new_stock, price, inv_id))
         InventoryTransaction.add({
-            'inventory_id': inv_id, 'type': '入库',
+            'inventory_id': inv_id, 'type': 'stock_in',
             'quantity': quantity, 'stock_after': new_stock,
             'unit_price': price, 'note': note or f'入库{quantity}'
         })
@@ -108,10 +108,33 @@ class Inventory:
         new_stock = inv.stock - quantity
         db.execute("UPDATE inventory SET stock=? WHERE id=?", (new_stock, inv_id))
         InventoryTransaction.add({
-            'inventory_id': inv_id, 'type': '出库',
+            'inventory_id': inv_id, 'type': 'stock_out',
             'quantity': -abs(quantity), 'stock_after': new_stock,
             'unit_price': inv.unit_price, 'bill_id': bill_id,
             'note': note or f'出库{quantity}'
+        })
+        db.commit()
+        return Inventory.get(inv_id), None
+
+    @staticmethod
+    def stock_adjust(inv_id, actual_stock, note=''):
+        db = Database().conn()
+        inv = Inventory.get(inv_id)
+        if not inv:
+            return None, '库存记录不存在'
+        if actual_stock < 0:
+            return None, '实际库存不能为负数'
+        diff = actual_stock - inv.stock
+        if diff == 0:
+            return Inventory.get(inv_id), None
+        new_stock = actual_stock
+        type_ = 'adjust_in' if diff > 0 else 'adjust_out'
+        db.execute("UPDATE inventory SET stock=? WHERE id=?", (new_stock, inv_id))
+        InventoryTransaction.add({
+            'inventory_id': inv_id, 'type': type_,
+            'quantity': diff, 'stock_after': new_stock,
+            'unit_price': inv.unit_price,
+            'note': note or f'盘点调整，原{inv.stock}现{new_stock}'
         })
         db.commit()
         return Inventory.get(inv_id), None
@@ -144,7 +167,7 @@ class Inventory:
                 new_stock = inv.stock - link['quantity']
                 db.execute("UPDATE inventory SET stock=? WHERE id=?", (new_stock, inv.id))
                 InventoryTransaction.add({
-                    'inventory_id': inv.id, 'type': '服务消耗',
+                    'inventory_id': inv.id, 'type': 'service_use',
                     'quantity': -link['quantity'],
                     'stock_after': new_stock,
                     'unit_price': inv.unit_price,
@@ -195,7 +218,7 @@ class InventoryTransaction:
                  created_at=None):
         self.id = id
         self.inventory_id = inventory_id
-        self.type = type
+        self.type_ = type
         self.quantity = quantity
         self.stock_after = stock_after
         self.unit_price = unit_price
@@ -227,12 +250,25 @@ class InventoryTransaction:
         db = Database().conn()
         cur = db.cursor()
         cur.execute("""
-            SELECT it.*, i.name as inv_name, i.unit as inv_unit
-            FROM inventory_transactions it
-            LEFT JOIN inventory i ON it.inventory_id = i.id
-            WHERE it.inventory_id=? ORDER BY it.created_at DESC LIMIT ?
+            SELECT * FROM inventory_transactions
+            WHERE inventory_id=? ORDER BY created_at DESC LIMIT ?
         """, (inv_id, limit))
-        return [dict(r) for r in cur.fetchall()]
+        rows = cur.fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            results.append(InventoryTransaction(
+                id=d.get('id'),
+                inventory_id=d.get('inventory_id'),
+                type=d.get('type', ''),
+                quantity=d.get('quantity', 0),
+                stock_after=d.get('stock_after', 0),
+                unit_price=d.get('unit_price', 0),
+                bill_id=d.get('bill_id'),
+                note=d.get('note', ''),
+                created_at=d.get('created_at')
+            ))
+        return results
 
 
 class ServiceInventoryLink:
@@ -246,6 +282,18 @@ class ServiceInventoryLink:
             LEFT JOIN inventory i ON sl.inventory_id = i.id
             WHERE sl.service_id=?
         """, (service_id,))
+        return [dict(r) for r in cur.fetchall()]
+
+    @staticmethod
+    def list_by_inventory(inv_id):
+        db = Database().conn()
+        cur = db.cursor()
+        cur.execute("""
+            SELECT sl.*, s.name as service_name
+            FROM service_inventory_links sl
+            LEFT JOIN services s ON sl.service_id = s.id
+            WHERE sl.inventory_id=?
+        """, (inv_id,))
         return [dict(r) for r in cur.fetchall()]
 
     @staticmethod

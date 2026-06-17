@@ -217,7 +217,10 @@ class MemberPage(QWidget):
         self.cb_member = QComboBox()
         self.cb_member.currentIndexChanged.connect(self._refresh_trans)
         tbar.addWidget(self.cb_member)
+        self.lbl_trans_count = QLabel('')
+        self.lbl_trans_count.setStyleSheet('color:#6b7280; font-size:12px;')
         tbar.addStretch(1)
+        tbar.addWidget(self.lbl_trans_count)
         trans_lay.addLayout(tbar)
         self.tbl_trans = QTableWidget(0, 5)
         self.tbl_trans.setHorizontalHeaderLabels(['时间', '类型', '金额(¥)', '积分变动', '备注'])
@@ -231,14 +234,21 @@ class MemberPage(QWidget):
         ''')
         trans_lay.addWidget(self.tbl_trans, 1)
         self.tabs.addTab(trans_tab, '📝 流水记录')
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         root.addWidget(self.tabs, 1)
+
+    def _on_tab_changed(self, idx):
+        if idx == 1:
+            self._refresh_trans()
 
     def refresh(self):
         kw = self.ed_search.text().strip() or None
         members = Member.list(kw)
+        current_id = self.cb_member.currentData() if self.cb_member.count() > 0 else None
         self.tbl_member.setRowCount(0)
         total_balance = 0
+        self.cb_member.blockSignals(True)
         self.cb_member.clear()
         self.cb_member.addItem('全部会员', None)
         for m in members:
@@ -280,23 +290,39 @@ class MemberPage(QWidget):
             self.tbl_member.setCellWidget(r, 6, op)
             self.tbl_member.setRowHeight(r, 42)
             self.cb_member.addItem(f'{m.owner_name} ({m.owner_phone}) {m.level}', m.id)
+        if current_id:
+            found = False
+            for i in range(self.cb_member.count()):
+                if self.cb_member.itemData(i) == current_id:
+                    self.cb_member.setCurrentIndex(i)
+                    found = True
+                    break
+            if not found:
+                self.cb_member.setCurrentIndex(0)
+        elif self.cb_member.count() > 1:
+            self.cb_member.setCurrentIndex(1)
+        else:
+            self.cb_member.setCurrentIndex(0)
+        self.cb_member.blockSignals(False)
         self.lbl_total.setText(f'会员 {len(members)} 名 | 储值余额合计 ¥{total_balance:.2f}')
+        if self.tabs.currentIndex() == 1:
+            self._refresh_trans()
 
     def _refresh_trans(self):
         mid = self.cb_member.currentData()
         if mid:
             trans = MemberTransaction.list_by_member(mid)
+            member_name = self.cb_member.currentText().split(' (')[0]
         else:
             trans = []
-            if self.cb_member.count() > 1:
-                first_id = self.cb_member.itemData(1)
-                if first_id:
-                    trans = MemberTransaction.list_by_member(first_id)
+            member_name = ''
         self.tbl_trans.setRowCount(0)
+        type_map = {'recharge': '💰 充值', 'consume': '💸 消费',
+                    'adjust': '📝 调整', 'award': '🎁 积分赠送',
+                    'bonus': '🎁 赠送', 'spend': '💸 积分抵扣'}
         for t in trans:
             r = self.tbl_trans.rowCount()
             self.tbl_trans.insertRow(r)
-            type_map = {'recharge': '💰 充值', 'consume': '💸 消费', 'adjust': '📝 调整', 'award': '🎁 赠送'}
             self.tbl_trans.setItem(r, 0, QTableWidgetItem((t.created_at or '').split('.')[0]))
             self.tbl_trans.setItem(r, 1, QTableWidgetItem(type_map.get(t.type_, t.type_)))
             amt = QTableWidgetItem(f'{t.amount:+.2f}')
@@ -305,11 +331,18 @@ class MemberPage(QWidget):
             elif t.amount < 0:
                 amt.setForeground(Qt.GlobalColor.red)
             self.tbl_trans.setItem(r, 2, amt)
-            pt = QTableWidgetItem(f'{t.points_delta:+d}' if t.points_delta else '0')
-            if t.points_delta and t.points_delta > 0:
+            pt_val = t.points_delta if t.points_delta is not None else 0
+            pt = QTableWidgetItem(f'{pt_val:+d}' if pt_val != 0 else '0')
+            if pt_val > 0:
                 pt.setForeground(Qt.GlobalColor.darkBlue)
+            elif pt_val < 0:
+                pt.setForeground(Qt.GlobalColor.red)
             self.tbl_trans.setItem(r, 3, pt)
             self.tbl_trans.setItem(r, 4, QTableWidgetItem(t.note or ''))
+        if mid:
+            self.lbl_trans_count.setText(f'共 {len(trans)} 条流水')
+        else:
+            self.lbl_trans_count.setText('请在上方选择会员查看流水')
 
     def _on_add(self):
         dlg = MemberFormDialog(self)
@@ -335,8 +368,22 @@ class MemberPage(QWidget):
             self.refresh()
 
     def _on_delete(self, member):
+        pet_count = Member.count_pets(member.id)
+        bill_count = Member.count_bills(member.id)
+        reasons = []
+        if pet_count > 0:
+            reasons.append(f'被 {pet_count} 只宠物档案关联')
+        if bill_count > 0:
+            reasons.append(f'有 {bill_count} 条账单记录')
+        if reasons:
+            QMessageBox.warning(
+                self, '无法删除',
+                f'会员「{member.owner_name}」无法删除：\n  • ' + '\n  • '.join(reasons)
+                + '\n\n相关宠物档案和账单记录仍可正常查看，建议在会员备注中标注"已停用"。'
+            )
+            return
         r = QMessageBox.question(self, '确认删除',
-                                 f'确定删除会员 {member.owner_name} ({member.owner_phone})？\n该会员关联的流水记录将被删除。',
+                                 f'确定删除会员 {member.owner_name} ({member.owner_phone})？\n该会员无任何关联记录，删除后不可恢复。',
                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                  QMessageBox.StandardButton.No)
         if r == QMessageBox.StandardButton.Yes:
